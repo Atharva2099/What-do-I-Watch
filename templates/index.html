@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anime Recommender</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-center mb-8 text-indigo-600">Anime Recommender</h1>
+        
+        <div class="max-w-6xl mx-auto">
+            <!-- Search Form -->
+            <div class="relative mb-8">
+                <form id="searchForm" class="flex gap-4">
+                    <input type="text" id="searchInput" 
+                           class="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" 
+                           placeholder="Search anime...">
+                    <select id="numRecommendations" 
+                            class="p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="5">5 recommendations</option>
+                        <option value="10" selected>10 recommendations</option>
+                        <option value="15">15 recommendations</option>
+                        <option value="20">20 recommendations</option>
+                    </select>
+                    <button type="submit" 
+                            class="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        Search
+                    </button>
+                </form>
+                
+                <!-- Search Results -->
+                <div id="searchResults" class="search-results mt-4"></div>
+            </div>
+
+            <!-- Loading Spinner -->
+            <div id="loading" class="hidden text-center mb-8">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-indigo-600 border-t-transparent"></div>
+                <p>Finding recommendations...</p>
+            </div>
+
+            <!-- Error Message -->
+            <div id="error" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-8"></div>
+
+            <!-- Selected Anime -->
+            <div id="selectedAnime" class="hidden mb-8 bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-2xl font-bold mb-4">Selected Anime</h2>
+                <div id="selectedAnimeContent"></div>
+            </div>
+
+            <!-- Recommendations Grid -->
+            <div id="recommendations" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        $(document).ready(function() {
+            let searchTimeout;
+            let selectedAnimeId = null;
+
+            // Handle search form submission
+            $('#searchForm').on('submit', function(e) {
+                e.preventDefault();
+                const query = $('#searchInput').val().trim();
+                
+                if (query) {
+                    clearTimeout(searchTimeout);
+                    performSearch(query);
+                }
+            });
+
+            // Perform search
+            function performSearch(query) {
+                $('#loading').show();
+                $('#error').hide();
+                $('#searchResults').empty();
+
+                $.ajax({
+                    url: '/search',
+                    method: 'POST',
+                    data: { query: query },
+                    success: function(response) {
+                        $('#loading').hide();
+                        
+                        if (response.error) {
+                            showError(response.error);
+                            return;
+                        }
+                        
+                        if (response.results && response.results.length > 0) {
+                            displaySearchResults(response.results);
+                        } else {
+                            showError('No results found');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        $('#loading').hide();
+                        showError('An error occurred while searching');
+                        console.error('Search error:', error);
+                    }
+                });
+            }
+
+            // Display search results
+            function displaySearchResults(results) {
+                const $results = $('#searchResults');
+                $results.empty();
+
+                const $list = $('<div>')
+                    .addClass('absolute z-10 w-full bg-white border border-gray-300 rounded-lg shadow-lg mt-1 max-h-96 overflow-y-auto');
+
+                results.forEach(result => {
+                    const $item = $('<div>')
+                        .addClass('p-3 hover:bg-gray-100 cursor-pointer')
+                        .html(`
+                            <div class="font-medium">${result.title}</div>
+                            <div class="text-sm text-gray-600">
+                                ${result.year ? result.year : 'Year N/A'} • 
+                                ${result.type ? result.type : 'Type N/A'} • 
+                                Score: ${result.score ? result.score.toFixed(2) : 'N/A'}
+                            </div>
+                        `)
+                        .click(() => {
+                            selectedAnimeId = result.mal_id;
+                            displaySelectedAnime(result);
+                            getRecommendations(result.mal_id);
+                            $results.empty();
+                        });
+
+                    $list.append($item);
+                });
+
+                $results.append($list);
+            }
+
+            // Display selected anime
+            function displaySelectedAnime(anime) {
+                const $selected = $('#selectedAnime');
+                const $content = $('#selectedAnimeContent');
+                
+                $content.html(`
+                    <div class="flex flex-col sm:flex-row gap-4">
+                        <div class="flex-1">
+                            <h3 class="font-bold text-xl mb-2">${anime.title}</h3>
+                            ${anime.title_english ? `<p class="text-gray-600 mb-2">English: ${anime.title_english}</p>` : ''}
+                            <p class="mb-1">Type: ${anime.type || 'N/A'}</p>
+                            <p class="mb-1">Year: ${anime.year || 'N/A'}</p>
+                            <p>Score: ${anime.score ? anime.score.toFixed(2) : 'N/A'}</p>
+                        </div>
+                    </div>
+                `);
+                
+                $selected.removeClass('hidden');
+            }
+
+            // Get recommendations
+            function getRecommendations(malId) {
+                const numRecs = $('#numRecommendations').val();
+                $('#loading').show();
+                $('#error').hide();
+                $('#recommendations').empty();
+
+                $.ajax({
+                    url: '/recommend',
+                    method: 'POST',
+                    data: {
+                        mal_id: malId,
+                        n_recommendations: numRecs
+                    },
+                    success: function(response) {
+                        $('#loading').hide();
+                        
+                        if (response.error) {
+                            showError(response.error);
+                            return;
+                        }
+                        
+                        if (response.recommendations && response.recommendations.length > 0) {
+                            displayRecommendations(response.recommendations);
+                        } else {
+                            showError('No recommendations found');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        $('#loading').hide();
+                        showError('An error occurred while getting recommendations');
+                        console.error('Recommendation error:', error);
+                    }
+                });
+            }
+
+            // Display recommendations
+            function displayRecommendations(recommendations) {
+                const $container = $('#recommendations');
+                $container.empty();
+
+                recommendations.forEach(anime => {
+                    const $card = $('<div>')
+                        .addClass('bg-white rounded-lg shadow-md overflow-hidden')
+                        .html(`
+                            <div class="p-4">
+                                ${anime.poster_url ? 
+                                    `<img src="${anime.poster_url}" alt="${anime.title}" class="w-full h-64 object-cover mb-4">` :
+                                    '<div class="w-full h-64 bg-gray-200 flex items-center justify-center mb-4">No Image</div>'
+                                }
+                                <h3 class="font-bold text-lg mb-2">${anime.title}</h3>
+                                <p class="text-gray-600 mb-1">Type: ${anime.type || 'N/A'}</p>
+                                <p class="text-gray-600 mb-1">Year: ${anime.year || 'N/A'}</p>
+                                <p class="text-gray-600">Score: ${anime.score ? anime.score.toFixed(2) : 'N/A'}</p>
+                            </div>
+                        `);
+
+                    $container.append($card);
+                });
+            }
+
+            // Show error message
+            function showError(message) {
+                const $error = $('#error');
+                $error.html(message).removeClass('hidden');
+            }
+        });
+    </script>
+</body>
+</html>
